@@ -1,8 +1,15 @@
-# 🧬 Hermes Agent Self-Evolution
+# 🧬 Hermes Agent Evolution Extension
 
-**Evolutionary self-improvement for [Hermes Agent](https://github.com/NousResearch/hermes-agent).**
+**Evolutionary self-improvement for [Hermes Agent](https://github.com/NousResearch/hermes-agent).**  
+This is an independent extension of [NousResearch/hermes-agent-self-evolution](https://github.com/NousResearch/hermes-agent-self-evolution), renamed and maintained separately as `hermes-agent-evolution-ext`.
 
-Hermes Agent Self-Evolution uses DSPy + GEPA (Genetic-Pareto Prompt Evolution) to automatically evolve and optimize Hermes Agent's skills, tool descriptions, system prompts, and code — producing measurably better versions through reflective evolutionary search.
+## Fork Origin
+
+This repository was forked from [NousResearch/hermes-agent-self-evolution](https://github.com/NousResearch/hermes-agent-self-evolution) (commit `02ae8f3`, 2026-01-15) and renamed to `hermes-agent-evolution-ext`.
+
+## What This Is
+
+Hermes Agent Evolution Extension uses DSPy + GEPA (Genetic-Pareto Prompt Evolution) to automatically evolve and optimize Hermes Agent's skills, tool descriptions, system prompts, and code — producing measurably better versions through reflective evolutionary search.
 
 **No GPU training required.** Everything operates via API calls — mutating text, evaluating results, and selecting the best variants. ~$2-10 per optimization run.
 
@@ -29,8 +36,8 @@ GEPA reads execution traces to understand *why* things fail (not just that they 
 
 ```bash
 # Install
-git clone https://github.com/NousResearch/hermes-agent-self-evolution.git
-cd hermes-agent-self-evolution
+git clone https://github.com/poyhsiao/hermes-agent-evolution-ext.git
+cd hermes-agent-evolution-ext
 pip install -e ".[dev]"
 
 # Point at your hermes-agent repo
@@ -66,6 +73,18 @@ python -m evolution.skills.evolve_skill \
 | **[DSPy](https://github.com/stanfordnlp/dspy) + [GEPA](https://github.com/gepa-ai/gepa)** | Reflective prompt evolution — reads execution traces, proposes targeted mutations | MIT |
 | **[Darwinian Evolver](https://github.com/imbue-ai/darwinian_evolver)** | Code evolution with Git-based organisms | AGPL v3 (external CLI only) |
 
+## Extension-Specific Fixes
+
+This extension maintains additional fixes beyond upstream:
+
+- **SyntheticDatasetBuilder fallback** — `ast.literal_eval` fallback for MiniMax JSON parsing failures
+- **GEPA fallback** — Graceful degradation to MIPROv2 when GEPA is unavailable
+- **Skill body evolution** — Improved `evolve_skill_body` that preserves YAML frontmatter structure
+- **Holdout improvements** — Robust adapter, cleaner holdout evaluation logic
+- **Hermes session importer** — Fix for short skill name matching
+- **OpenCode CI integration** — GitHub Actions workflow for OpenCode PR comments
+- **Sourcery code improvements** — Multiple code quality fixes
+
 ## Guardrails
 
 Every evolved variant must pass:
@@ -81,4 +100,4 @@ See [PLAN.md](PLAN.md) for the complete architecture, evaluation data strategy, 
 
 ## License
 
-MIT — © 2026 Nous Research
+MIT — © 2026 Nous Research (original), poyhsiao (this extension)

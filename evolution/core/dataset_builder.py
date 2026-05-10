@@ -6,8 +6,10 @@ B) SessionDB mining — extract real usage patterns and score with LLM-as-judge
 C) Golden sets — hand-curated JSONL files
 """
 
+import ast
 import json
 import random
+import re
 from pathlib import Path
 from dataclasses import dataclass, field
 from typing import Optional
@@ -86,6 +88,49 @@ class EvalDataset:
         ]
 
 
+def _parse_test_cases(raw: str) -> list[dict]:
+    """Parse test cases from LLM output with multiple fallback strategies.
+
+    1. Strict JSON
+    2. Python literal (ast.literal_eval) — handles single-quoted keys
+    3. Non-greedy regex extraction of first JSON array
+    """
+    # 1) Try strict JSON first
+    try:
+        parsed = json.loads(raw)
+        # Handle wrapped {"test_cases": [...]} shape
+        if isinstance(parsed, dict) and "test_cases" in parsed:
+            parsed = parsed["test_cases"]
+        if isinstance(parsed, list):
+            return parsed
+        # Fall through: not a list even after unwrapping
+    except json.JSONDecodeError:
+        pass
+
+    # 2) Try tolerant Python literal parsing
+    try:
+        parsed = ast.literal_eval(raw)
+        if isinstance(parsed, list):
+            return parsed
+        if isinstance(parsed, dict) and "test_cases" in parsed:
+            return parsed["test_cases"]
+    except (ValueError, SyntaxError):
+        pass
+
+    # 3) Try extracting first JSON array via non-greedy regex
+    match = re.search(r"\[.*?\]", raw, re.DOTALL)
+    if match:
+        try:
+            return json.loads(match.group())
+        except json.JSONDecodeError:
+            pass
+
+    raise ValueError(
+        f"Could not parse test cases from LLM output "
+        f"(tried json, ast.literal_eval, and regex): {raw[:300]}"
+    )
+
+
 class SyntheticDatasetBuilder:
     """Generate evaluation datasets using a strong LLM.
 
@@ -132,17 +177,8 @@ class SyntheticDatasetBuilder:
                 num_cases=n,
             )
 
-        # Parse the generated test cases
-        try:
-            cases_raw = json.loads(result.test_cases)
-        except json.JSONDecodeError:
-            # Try to extract JSON from the response
-            import re
-            match = re.search(r'\[.*\]', result.test_cases, re.DOTALL)
-            if match:
-                cases_raw = json.loads(match.group())
-            else:
-                raise ValueError(f"Could not parse test cases from LLM output: {result.test_cases[:200]}")
+        # Parse the generated test cases using the helper (handles JSON, ast.literal_eval, and non-greedy regex fallback)
+        cases_raw = _parse_test_cases(result.test_cases)
 
         examples = [
             EvalExample(
