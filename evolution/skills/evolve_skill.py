@@ -84,7 +84,7 @@ def _normalize_llm_text_response(raw: str) -> str:
     text = str(raw).strip()
 
     # Try to unwrap {"text": ...} / {'text': ...} — only at the start of the string
-    if text.startswith("{") or text.startswith("'{"):
+    if text.startswith(("{", "'{")):
         text_like_pattern = re.compile(r"^\s*\{\s*['\"]?text['\"]?\s*:\s*")
         if text_like_pattern.match(text):
             try:
@@ -114,7 +114,7 @@ def evolve_skill_body(
     few_shot_examples: list,
     config: EvolutionConfig,
     num_examples: int = 3,
-    original_heading: str = None,
+    original_heading: str | None = None,
 ) -> str:
     """Regenerate the skill body using an LLM, inspired by the best MIPRO instruction.
 
@@ -302,7 +302,7 @@ def evolve(
     warnings.filterwarnings("ignore", category=UserWarning,
                            message=r"Input contains fields not in signature")
 
-    console.print(f"\n[bold]Configuring optimizer[/bold]")
+    console.print("\n[bold]Configuring optimizer[/bold]")
     console.print(f"  Optimizer: MIPROv2 ({iterations} iterations)")
     console.print(f"  Optimizer model: {optimizer_model}")
     console.print(f"  Eval model: {eval_model}")
@@ -315,37 +315,30 @@ def evolve(
     valset = dataset.to_dspy_examples("val")
 
     # ── 5. Run MIPROv2 optimization ─────────────────────────────────────
-    console.print(f"\n[bold cyan]Running MIPROv2 optimization ({iterations} iterations)...[/bold cyan]\n")
+    console.print("\n[bold cyan]Running MIPROv2 optimization[/bold cyan]")
 
     start_time = time.time()
 
     try:
-        # Try GEPA first (more powerful) but it requires init compatibility
         optimizer = dspy.GEPA(
             metric=skill_fitness_metric,
             max_steps=iterations,
         )
         optimizer_name = "GEPA"
-        with dspy.context(lm=optimizer_lm):
-            optimized_module = optimizer.compile(
-                baseline_module,
-                trainset=trainset,
-                valset=valset,
-            )
-    except Exception as e:
-        # Fall back to MIPROv2 if GEPA isn't available in this DSPy version
+    except (AttributeError, TypeError) as e:
         console.print(f"[yellow]GEPA not available ({e}), falling back to MIPROv2[/yellow]")
         optimizer = dspy.MIPROv2(
             metric=skill_fitness_metric,
             auto="light",
         )
         optimizer_name = "MIPROv2"
-        with dspy.context(lm=optimizer_lm):
-            optimized_module = optimizer.compile(
-                baseline_module,
-                trainset=trainset,
-                valset=valset,
-            )
+
+    with dspy.context(lm=optimizer_lm):
+        optimized_module = optimizer.compile(
+            baseline_module,
+            trainset=trainset,
+            valset=valset,
+        )
 
     elapsed = time.time() - start_time
     console.print(f"\n  Optimization completed in {elapsed:.1f}s")
@@ -355,14 +348,15 @@ def evolve(
     evolved_instruction = optimized_module.skill_text
 
     # ── 7. Evolve the full skill body using LLM ─────────────────────────
-    console.print(f"\n[bold]Evolving skill body content[/bold]")
-    few_shot_examples = []
-    for ex in dataset.train[:3]:
-        few_shot_examples.append({
+    console.print("\n[bold]Evolving skill body content[/bold]")
+    few_shot_examples = [
+        {
             "task_input": getattr(ex, "task_input", ""),
             "expected_behavior": getattr(ex, "expected_behavior", ""),
             "agent_output": getattr(ex, "agent_output", ""),
-        })
+        }
+        for ex in dataset.train[:3]
+    ]
 
     heading_match = re.search(r'^#\s+.+$', skill["body"], re.MULTILINE)
     original_heading = heading_match.group(0) if heading_match else "# Skill"
@@ -375,7 +369,7 @@ def evolve(
         num_examples=min(3, len(dataset.train)),
         original_heading=original_heading,
     )
-    console.print(f"  Evolved body: {len(evolved_body):,} chars (original: {len(skill['body']):,})")
+    console.print(f"  Evolved body: {len(evolved_body):,} chars")
 
     # Reassemble the full skill (frontmatter + evolved body)
     evolved_full = reassemble_skill(skill["frontmatter"], evolved_body)
@@ -410,7 +404,7 @@ def evolve(
     holdout_scores = []
     for ex in holdout_examples:
         try:
-            with dspy.context(lm=lm):
+            with dspy.context(lm=eval_lm):
                 baseline_pred = baseline_module(task_input=getattr(ex, "task_input", ""))
                 evolved_pred = evolved_module(task_input=getattr(ex, "task_input", ""))
                 baseline_score = skill_fitness_metric(ex, baseline_pred)

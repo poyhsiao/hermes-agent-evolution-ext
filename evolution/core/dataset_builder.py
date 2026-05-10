@@ -110,10 +110,10 @@ def _parse_test_cases(raw: str) -> list[dict]:
     # 2) Try tolerant Python literal parsing
     try:
         parsed = ast.literal_eval(raw)
-        if isinstance(parsed, list):
-            return parsed
         if isinstance(parsed, dict) and "test_cases" in parsed:
-            return parsed["test_cases"]
+            parsed = parsed["test_cases"]
+        if isinstance(parsed, list) and all(isinstance(case, dict) for case in parsed):
+            return parsed
     except (ValueError, SyntaxError):
         pass
 
