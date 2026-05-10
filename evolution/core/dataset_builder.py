@@ -101,7 +101,7 @@ def _parse_test_cases(raw: str) -> list[dict]:
         # Handle wrapped {"test_cases": [...]} shape
         if isinstance(parsed, dict) and "test_cases" in parsed:
             parsed = parsed["test_cases"]
-        if isinstance(parsed, list):
+        if isinstance(parsed, list) and all(isinstance(case, dict) for case in parsed):
             return parsed
         # Fall through: not a list even after unwrapping
     except json.JSONDecodeError:
@@ -117,11 +117,13 @@ def _parse_test_cases(raw: str) -> list[dict]:
     except (ValueError, SyntaxError):
         pass
 
-    # 3) Try extracting first JSON array via non-greedy regex
-    match = re.search(r"\[.*?\]", raw, re.DOTALL)
+    # 3) Try extracting the outermost JSON array (greedy: first '[' to last ']')
+    match = re.search(r"\[.*\]", raw, re.DOTALL)
     if match:
         try:
-            return json.loads(match.group())
+            parsed = json.loads(match.group())
+            if isinstance(parsed, list) and all(isinstance(case, dict) for case in parsed):
+                return parsed
         except json.JSONDecodeError:
             pass
 
