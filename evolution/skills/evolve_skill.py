@@ -111,9 +111,10 @@ def _normalize_llm_text_response(raw: str) -> str:
 def evolve_skill_body(
     original_body: str,
     best_instruction: str,
-    few_shot_examples: list[dict],
+    few_shot_examples: list,
     config: EvolutionConfig,
     num_examples: int = 3,
+    original_heading: str = None,
 ) -> str:
     """Regenerate the skill body using an LLM, inspired by the best MIPRO instruction.
 
@@ -123,10 +124,14 @@ def evolve_skill_body(
         few_shot_examples: List of {task_input, expected_behavior, agent_output} dicts.
         config: EvolutionConfig with eval_model set.
         num_examples: How many few-shot examples to include.
+        original_heading: The first heading from the original skill body to preserve.
 
     Returns:
         The evolved skill body (markdown), keeping the original frontmatter unchanged.
     """
+    if original_heading is None:
+        heading_match = re.search(r'^#\s+.+$', original_body, re.MULTILINE)
+        original_heading = heading_match.group(0) if heading_match else "# Skill"
     examples_text = ""
     for i, ex in enumerate(few_shot_examples[:num_examples]):
         examples_text += f"## Example {i+1}\n\n**Task:**\n{ex.get('task_input', '')}\n\n"
@@ -163,7 +168,7 @@ Requirements:
 ---
 ## Your rewritten skill body:
 
-IMPORTANT: Output ONLY the rewritten skill body in plain markdown. Do NOT wrap in quotes, dictionaries, code fences, or any wrapper. Start directly with the heading "# GitHub Code Review" (or whatever heading is appropriate).
+IMPORTANT: Output ONLY the rewritten skill body in plain markdown. Do NOT wrap in quotes, dictionaries, code fences, or any wrapper. Start directly with the heading "{original_heading}" (preserving the original heading text exactly).
 """
 
     lm = dspy.LM(config.eval_model)
@@ -285,11 +290,10 @@ def evolve(
 
     # ── 4. Set up DSPy + MIPROv2 optimizer ──────────────────────────────
     # Use robust adapter to handle MiniMax's occasional malformed output blocks
-    dspy.configure(adapter=RobustJSONAdapter())
+    eval_lm = dspy.LM(eval_model)
+    optimizer_lm = dspy.LM(optimizer_model)
 
-    # Configure the default LM for evaluation
-    lm = dspy.LM(eval_model)
-    dspy.configure(lm=lm)
+    dspy.configure(lm=eval_lm, adapter=RobustJSONAdapter())
 
     # Suppress the known MIPROv2 warning about unused fields in InstructSelector
     # (program_code, module, program_description, module_description, previous_instructions)
@@ -322,11 +326,12 @@ def evolve(
             max_steps=iterations,
         )
         optimizer_name = "GEPA"
-        optimized_module = optimizer.compile(
-            baseline_module,
-            trainset=trainset,
-            valset=valset,
-        )
+        with dspy.context(lm=optimizer_lm):
+            optimized_module = optimizer.compile(
+                baseline_module,
+                trainset=trainset,
+                valset=valset,
+            )
     except Exception as e:
         # Fall back to MIPROv2 if GEPA isn't available in this DSPy version
         console.print(f"[yellow]GEPA not available ({e}), falling back to MIPROv2[/yellow]")
@@ -335,11 +340,12 @@ def evolve(
             auto="light",
         )
         optimizer_name = "MIPROv2"
-        optimized_module = optimizer.compile(
-            baseline_module,
-            trainset=trainset,
-            valset=valset,
-        )
+        with dspy.context(lm=optimizer_lm):
+            optimized_module = optimizer.compile(
+                baseline_module,
+                trainset=trainset,
+                valset=valset,
+            )
 
     elapsed = time.time() - start_time
     console.print(f"\n  Optimization completed in {elapsed:.1f}s")
@@ -358,12 +364,16 @@ def evolve(
             "agent_output": getattr(ex, "agent_output", ""),
         })
 
+    heading_match = re.search(r'^#\s+.+$', skill["body"], re.MULTILINE)
+    original_heading = heading_match.group(0) if heading_match else "# Skill"
+
     evolved_body = evolve_skill_body(
         original_body=skill["body"],
         best_instruction=evolved_instruction,
         few_shot_examples=few_shot_examples,
         config=config,
         num_examples=min(3, len(dataset.train)),
+        original_heading=original_heading,
     )
     console.print(f"  Evolved body: {len(evolved_body):,} chars (original: {len(skill['body']):,})")
 
@@ -438,13 +448,13 @@ def evolve(
     table.add_column("Evolved", justify="right")
     table.add_column("Change", justify="right")
 
-    change = avg_evolved - avg_baseline
-    change_color = "green" if change > 0 else "yellow"
+    change = (avg_evolved - avg_baseline) if (avg_baseline is not None and avg_evolved is not None) else None
+    change_color = "green" if change is not None and change > 0 else "yellow"
     table.add_row(
         "Holdout Score (avg)",
         f"{avg_baseline:.3f}" if valid_baseline else "N/A",
         f"{avg_evolved:.3f}" if valid_evolved else "N/A",
-        f"{change:+.3f}" if valid_evolved else "N/A",
+        f"{change:+.3f}" if change is not None else "N/A",
     )
     table.add_row(
         "Skill Size",
