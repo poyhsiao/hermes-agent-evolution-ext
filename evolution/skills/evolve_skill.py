@@ -320,32 +320,25 @@ def evolve(
     start_time = time.time()
 
     try:
-        # Try GEPA first (more powerful) but it requires init compatibility
         optimizer = dspy.GEPA(
             metric=skill_fitness_metric,
             max_steps=iterations,
         )
         optimizer_name = "GEPA"
-        with dspy.context(lm=optimizer_lm):
-            optimized_module = optimizer.compile(
-                baseline_module,
-                trainset=trainset,
-                valset=valset,
-            )
-    except Exception as e:
-        # Fall back to MIPROv2 if GEPA isn't available in this DSPy version
+    except (AttributeError, TypeError) as e:
         console.print(f"[yellow]GEPA not available ({e}), falling back to MIPROv2[/yellow]")
         optimizer = dspy.MIPROv2(
             metric=skill_fitness_metric,
             auto="light",
         )
         optimizer_name = "MIPROv2"
-        with dspy.context(lm=optimizer_lm):
-            optimized_module = optimizer.compile(
-                baseline_module,
-                trainset=trainset,
-                valset=valset,
-            )
+
+    with dspy.context(lm=optimizer_lm):
+        optimized_module = optimizer.compile(
+            baseline_module,
+            trainset=trainset,
+            valset=valset,
+        )
 
     elapsed = time.time() - start_time
     console.print(f"\n  Optimization completed in {elapsed:.1f}s")
@@ -410,7 +403,7 @@ def evolve(
     holdout_scores = []
     for ex in holdout_examples:
         try:
-            with dspy.context(lm=lm):
+            with dspy.context(lm=eval_lm):
                 baseline_pred = baseline_module(task_input=getattr(ex, "task_input", ""))
                 evolved_pred = evolved_module(task_input=getattr(ex, "task_input", ""))
                 baseline_score = skill_fitness_metric(ex, baseline_pred)
